@@ -164,9 +164,77 @@ def panorama(imgs: Dict[str, torch.Tensor]):
         img: panorama, 
         overlap: torch.Tensor of the output image. 
     """
-    img = torch.zeros((3, 256, 256)) # assumed 256*256 resolution. Update this as per your logic.
-    overlap = torch.empty((3, 256, 256)) # assumed empty 256*256 overlap. Update this as per your logic.
+    keys = sorted(list(imgs.keys()))
+    N = len(keys)
+    
+    # 1. Prepare images (float 0~1)
+    tensors = [(imgs[k].float() / 255.0).unsqueeze(0) for k in keys]
+    
+    # 2. Extract SIFT features for all images
+    sift = K.feature.SIFTFeature(num_features=1000)
+    lafs, descs = [], []
+    for t in tensors:
+        gray = K.color.rgb_to_grayscale(t)
+        l, _, d = sift(gray)
+        lafs.append(l)
+        descs.append(d)
+        
+    # 3. Build Overlap Matrix & Relative Homographies
+    # overlap shape must be (N, N)
+    overlap = torch.zeros((N, N), dtype=torch.int32)
+    H_rel = {} # H_rel[(src, dst)], H matrix
+    
+    for i in range(N):
+        for j in range(i + 1, N):
+            dist, idx = K.feature.match_snn(descs[i][0], descs[j][0], 0.8)
+            
+            # Too few matches: no overlap
+            if len(idx) < 20:
+                continue
+                
+            pts_i = K.feature.get_laf_center(lafs[i])[0, idx[:, 0]]
+            pts_j = K.feature.get_laf_center(lafs[j])[0, idx[:, 1]]
+            
+            # RANSAC
+            max_inliers = 0
+            best_H = None
+            for _ in range(100):
+                rand_idx = torch.randperm(len(pts_i))[:4]
+                src = pts_j[rand_idx].unsqueeze(0)
+                dst = pts_i[rand_idx].unsqueeze(0)
+                
+                try:
+                    H_est = K.geometry.homography.find_homography_dlt(src, dst)[0]
+                    proj = (H_est @ torch.cat([pts_j, torch.ones_like(pts_j[:, :1])], dim=-1).T).T
+                    proj = proj[:, :2] / (proj[:, 2:] + 1e-8)
+                    
+                    inliers = (torch.norm(proj - pts_i, dim=-1) < 4.0).sum().item()
+                    if inliers > max_inliers:
+                        max_inliers = inliers
+                        best_H = H_est
+                except:
+                    continue
+            
+            if max_inliers > 20 and best_H is not None:
+                # SANITY CHECK: Prevent exploding canvas and warped streaks
+                h, w = tensors[j].shape[2], tensors[j].shape[3]
+                corners = torch.tensor([[0,0], [w,0], [w,h], [0,h]], dtype=torch.float32)
+                proj_c = (best_H @ torch.cat([corners, torch.ones_like(corners[:, :1])], dim=-1).T).T
+                proj_c = proj_c[:, :2] / (proj_c[:, 2:] + 1e-8)
+                
+                p_w = proj_c[:, 0].max() - proj_c[:, 0].min()
+                p_h = proj_c[:, 1].max() - proj_c[:, 1].min()
+                
+                if p_w > 4.0 * w or p_h > 4.0 * h or p_w < 10 or p_h < 10:
+                    print(f"DEBUG: Rejected bad Homography between {i} and {j}")
+                    continue
+                
+                overlap[i, j] = 1
+                overlap[j, i] = 1
+                H_rel[(j, i)] = best_H # j maps to i
+                try:
+                    H_rel[(i, j)] = torch.linalg.inv(best_H) # i maps to j
+                except:
+                    pass
 
-    #TODO: Add your code here. Do not modify the return and input arguments.
-
-    return img, overlap
+    return final_img, overlap
