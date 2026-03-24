@@ -10,7 +10,7 @@ import kornia as K
 from typing import Dict
 from utils import show_image
 # debug
-from utils import write_image
+# from utils import write_image
 '''
 Please do NOT add any imports. The allowed libraries are already imported for you.
 '''
@@ -24,11 +24,10 @@ def stitch_background(imgs: Dict[str, torch.Tensor]) -> torch.Tensor:
         img: stitched_image: torch.Tensor of the output image.
     """
     img_keys = list(imgs.keys())
-    # Convert uint8 to float32 in [0, 1] and add batch dimension [B, C, H, W]
     img1 = (imgs[img_keys[0]].float() / 255.0).unsqueeze(0)
     img2 = (imgs[img_keys[1]].float() / 255.0).unsqueeze(0)
 
-    # 1. Feature Extraction (SIFT)
+    # 1. SIFT
     gray1 = K.color.rgb_to_grayscale(img1)
     gray2 = K.color.rgb_to_grayscale(img2)
 
@@ -36,7 +35,7 @@ def stitch_background(imgs: Dict[str, torch.Tensor]) -> torch.Tensor:
     lafs1, _, descs1 = sift(gray1)
     lafs2, _, descs2 = sift(gray2)
 
-    # 2. Feature Matching (Ratio Test via SNN)
+    # 2. Feature Matching
     distances, indexes = K.feature.match_snn(descs1[0], descs2[0], 0.8)
 
     # Extract XY coordinates of matches
@@ -44,17 +43,17 @@ def stitch_background(imgs: Dict[str, torch.Tensor]) -> torch.Tensor:
     pts2 = K.feature.get_laf_center(lafs2)[0, indexes[:, 1]] # [N, 2]
 
     # DEBUG 1: Visualizing Extracted SIFT Points 
-    print("DEBUG: Showing Image 1 with Matched Keypoints")
-    img1_viz = img1[0].clone()
-    h_viz, w_viz = img1_viz.shape[1], img1_viz.shape[2]
-    for p in pts1.long():
-        x, y = p[0].item(), p[1].item()
-        if 0 <= x < w_viz and 0 <= y < h_viz:
-            img1_viz[0, max(0, y-1):min(h_viz, y+2), max(0, x-1):min(w_viz, x+2)] = 1.0
-            img1_viz[1, max(0, y-1):min(h_viz, y+2), max(0, x-1):min(w_viz, x+2)] = 0.0
-            img1_viz[2, max(0, y-1):min(h_viz, y+2), max(0, x-1):min(w_viz, x+2)] = 0.0
-    img1_viz_uint8 = (img1_viz * 255.0).clamp(0, 255).to(torch.uint8)
-    write_image(img1_viz_uint8, "debug1_features.png")
+    # print("DEBUG: Showing Image 1 with Matched Keypoints")
+    # img1_viz = img1[0].clone()
+    # h_viz, w_viz = img1_viz.shape[1], img1_viz.shape[2]
+    # for p in pts1.long():
+    #     x, y = p[0].item(), p[1].item()
+    #     if 0 <= x < w_viz and 0 <= y < h_viz:
+    #         img1_viz[0, max(0, y-1):min(h_viz, y+2), max(0, x-1):min(w_viz, x+2)] = 1.0
+    #         img1_viz[1, max(0, y-1):min(h_viz, y+2), max(0, x-1):min(w_viz, x+2)] = 0.0
+    #         img1_viz[2, max(0, y-1):min(h_viz, y+2), max(0, x-1):min(w_viz, x+2)] = 0.0
+    # img1_viz_uint8 = (img1_viz * 255.0).clamp(0, 255).to(torch.uint8)
+    # write_image(img1_viz_uint8, "debug1_features.png")
     # =====
 
     # 3. Homography Estimation with RANSAC
@@ -112,9 +111,9 @@ def stitch_background(imgs: Dict[str, torch.Tensor]) -> torch.Tensor:
 
     # DEBUG 2: Visualizing Warped Images
     # If warp2 looks like a correctly projected perspective of img2, RANSAC and Canvas logic succeeded.
-    print("DEBUG: Showing Warped Image 2")
-    warp2_uint8 = (warp2[0] * 255.0).clamp(0, 255).to(torch.uint8)
-    write_image(warp2_uint8, "debug2_warped.png")
+    # print("DEBUG: Showing Warped Image 2")
+    # warp2_uint8 = (warp2[0] * 255.0).clamp(0, 255).to(torch.uint8)
+    # write_image(warp2_uint8, "debug2_warped.png")
     # 
 
     mask2 = K.geometry.transform.warp_perspective(torch.ones_like(img2), H_img2.unsqueeze(0), dsize=(out_h, out_w)) > 0
@@ -127,18 +126,17 @@ def stitch_background(imgs: Dict[str, torch.Tensor]) -> torch.Tensor:
     moving_object_mask = diff > 0.15 
 
     # DEBUG 3: Visualizing Background Elimination Logic
-    print("DEBUG: Saving Difference Mask and Hard Cut Mask to disk...")
+    # print("DEBUG: Saving Difference Mask and Hard Cut Mask to disk...")
+    # # 1. Save normalized difference map
+    # diff_vis = (diff[0] / (diff.max() + 1e-8) * 255.0).clamp(0, 255).to(torch.uint8)
+    # diff_vis = diff_vis.repeat(3, 1, 1) 
+    # write_image(diff_vis, "debug3_diff_map.png")
     
-    # 1. Save normalized difference map
-    diff_vis = (diff[0] / (diff.max() + 1e-8) * 255.0).clamp(0, 255).to(torch.uint8)
-    diff_vis = diff_vis.repeat(3, 1, 1) 
-    write_image(diff_vis, "debug3_diff_map.png")
-    
-    # 2. Save the boolean moving object mask
-    # Black = Background, White = Moving Object
-    mask_vis = (moving_object_mask[0].float() * 255.0).clamp(0, 255).to(torch.uint8)
-    mask_vis = mask_vis.repeat(3, 1, 1)
-    write_image(mask_vis, "debug4_moving_mask.png")
+    # # 2. Save the boolean moving object mask
+    # # Black = Background, White = Moving Object
+    # mask_vis = (moving_object_mask[0].float() * 255.0).clamp(0, 255).to(torch.uint8)
+    # mask_vis = mask_vis.repeat(3, 1, 1)
+    # write_image(mask_vis, "debug4_moving_mask.png")
     # 
     
     blend = (warp1 + warp2) / 2.0
@@ -188,8 +186,9 @@ def panorama(imgs: Dict[str, torch.Tensor]):
         for j in range(i + 1, N):
             dist, idx = K.feature.match_snn(descs[i][0], descs[j][0], 0.8)
             
-            # Too few matches: no overlap
+            # Too few matches, no overlap
             if len(idx) < 20:
+                print(f"Skipping {i} and {j}")
                 continue
                 
             pts_i = K.feature.get_laf_center(lafs[i])[0, idx[:, 0]]
@@ -236,5 +235,57 @@ def panorama(imgs: Dict[str, torch.Tensor]):
                     H_rel[(i, j)] = torch.linalg.inv(best_H) # i maps to j
                 except:
                     pass
+    # Find the image with max overlaps
+    degrees = overlap.sum(dim=1)
+    anchor = int(torch.argmax(degrees).item())
+    
+    H_global = {anchor: torch.eye(3, dtype=torch.float32)}
+    queue = [anchor]
+    
+    while queue:
+        curr = queue.pop(0)
+        for nxt in range(N):
+            if overlap[curr, nxt] == 1 and nxt not in H_global and (nxt, curr) in H_rel:
+                H_global[nxt] = H_global[curr] @ H_rel[(nxt, curr)]
+                queue.append(nxt)
+                
+    # Calculate global canvas boundaries
+    all_x, all_y = [], []
+    for idx, H in H_global.items():
+        h, w = tensors[idx].shape[2], tensors[idx].shape[3]
+        corners = torch.tensor([[0,0], [w,0], [w,h], [0,h]], dtype=torch.float32)
+        proj = (H @ torch.cat([corners, torch.ones_like(corners[:, :1])], dim=-1).T).T
+        proj = proj[:, :2] / (proj[:, 2:] + 1e-8)
+        
+        all_x.append(proj[:, 0])
+        all_y.append(proj[:, 1])
+        
+    all_x, all_y = torch.cat(all_x), torch.cat(all_y)
+    min_x, max_x = torch.floor(all_x.min()).item(), torch.ceil(all_x.max()).item()
+    min_y, max_y = torch.floor(all_y.min()).item(), torch.ceil(all_y.max()).item()
+    
+    out_w, out_h = int(max_x - min_x), int(max_y - min_y)
+    
+    # Translation matrix to shift canvas to positive coordinates
+    T = torch.tensor([[1.0, 0.0, -min_x],
+                      [0.0, 1.0, -min_y],
+                      [0.0, 0.0, 1.0]], dtype=torch.float32)
 
+    # Warp and Paste
+    canvas = torch.zeros((3, out_h, out_w), dtype=torch.float32)
+    
+    for idx, H in H_global.items():
+        H_final = T @ H
+        warped = K.geometry.transform.warp_perspective(tensors[idx], H_final.unsqueeze(0), (out_h, out_w))[0]
+        
+        # print(f"DEBUG: Saving intermediate warped image {idx}...")
+        # warped_uint8 = (warped * 255.0).clamp(0, 255).to(torch.uint8)
+        # write_image(warped_uint8, f"debug_task2_warped_{idx}.png")
+        
+        mask = warped > 0
+        canvas = torch.where(mask & (canvas == 0), warped, canvas) 
+
+    # print("DEBUG: Saving final raw canvas...")
+    final_img = (canvas * 255.0).clamp(0, 255).to(torch.uint8)
+    # write_image(final_img, "debug_task2_final_canvas.png")
     return final_img, overlap
